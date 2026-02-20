@@ -1,5 +1,0 @@
-# CartographyDB
-
-
-
-## Getting started
