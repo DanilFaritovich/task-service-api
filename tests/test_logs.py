@@ -1,155 +1,128 @@
 """
 Тесты для эндпоинтов логов
 """
+
 import pytest
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
-from backend.database.models import Log, Service, Task, User
+
+from backend.database.models import Log, User
 
 
 class TestLogs:
     """Тесты для операций с логами"""
 
     @pytest.mark.asyncio
-    async def test_create_log(self, client: AsyncClient):
-        """Тест создания записи в логе"""
+    async def test_create_log(self, client: AsyncClient, sample_user: User):
+        """Тест создания нового лога"""
         log_data = {
-            "message": "Test log message",
+            "user_id": sample_user.id,
+            "source": "task_processor",
+            "message": "Task started successfully",
             "level": "INFO",
-            "context_data": {"key": "value"}
+            "context_data": {"task_id": 123},
         }
 
         response = await client.post("/logs/", json=log_data)
 
-        assert response.status_code == 201
+        assert response.status_code == 200
         data = response.json()
-        assert data["message"] == "Test log message"
+        assert data["user_id"] == sample_user.id
+        assert data["source"] == "task_processor"
+        assert data["message"] == "Task started successfully"
         assert data["level"] == "INFO"
-        assert data["context_data"]["key"] == "value"
+        assert data["context_data"] == {"task_id": 123}
         assert "id" in data
+        assert "timestamp" in data
 
     @pytest.mark.asyncio
-    async def test_get_logs(self, client: AsyncClient):
+    async def test_get_logs(self, client: AsyncClient, sample_log: Log):
         """Тест получения списка логов"""
-        # Создаём несколько записей
-        logs = [
-            {"message": "Log 1", "level": "INFO"},
-            {"message": "Log 2", "level": "ERROR"},
-            {"message": "Log 3", "level": "WARNING"}
-        ]
-
-        for log in logs:
-            await client.post("/logs/", json=log)
-
         response = await client.get("/logs/")
 
         assert response.status_code == 200
-        data = response.json()
+        data = response.json()["data"]
         assert isinstance(data, list)
-        assert len(data) >= 3
-
-    @pytest.mark.asyncio
-    async def test_filter_logs_by_level(self, client: AsyncClient):
-        """Тест фильтрации логов по уровню"""
-        # Создаём логи разных уровней
-        await client.post("/logs/", json={"message": "Info log", "level": "INFO"})
-        await client.post("/logs/", json={"message": "Error log", "level": "ERROR"})
-        await client.post("/logs/", json={"message": "Warning log", "level": "WARNING"})
-
-        response = await client.get("/logs/?level=ERROR")
-
-        assert response.status_code == 200
-        data = response.json()
         assert len(data) >= 1
-        assert all(log["level"] == "ERROR" for log in data)
 
     @pytest.mark.asyncio
-    async def test_filter_logs_by_hours(self, client: AsyncClient):
-        """Тест фильтрации логов по времени"""
-        # Создаём лог
-        await client.post("/logs/", json={"message": "Recent log", "level": "INFO"})
-
-        # Получаем логи за последние 1 час
-        response = await client.get("/logs/?hours=1")
+    async def test_get_log_by_id(self, client: AsyncClient, sample_log: Log):
+        """Тест получения лога по ID"""
+        response = await client.get(f"/logs/{sample_log.id}")
 
         assert response.status_code == 200
         data = response.json()
-        assert isinstance(data, list)
+        assert data["id"] == sample_log.id
+        assert data["user_id"] == sample_log.user_id
+        assert data["message"] == sample_log.message
 
     @pytest.mark.asyncio
-    async def test_filter_logs_by_service(self, client: AsyncClient, sample_service: Service):
-        """Тест фильтрации логов по сервису"""
-        log_data = {
-            "message": "Service log",
-            "level": "INFO",
-            "service_id": sample_service.id
+    async def test_get_log_not_found(self, client: AsyncClient):
+        """Тест получения несуществующего лога"""
+        response = await client.get("/logs/999999")
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_create_log_invalid_level(
+        self, client: AsyncClient, sample_user: User
+    ):
+        """Тест создания лога с невалидным уровнем"""
+        invalid_log = {
+            "user_id": sample_user.id,
+            "source": "invalid_logger",
+            "message": "Invalid level test",
+            "level": "INVALID_LEVEL",  # Невалидный уровень
         }
 
-        await client.post("/logs/", json=log_data)
+        response = await client.post("/logs/", json=invalid_log)
 
-        response = await client.get(f"/logs/?service_id={sample_service.id}")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) >= 1
-        assert data[0]["service_id"] == sample_service.id
+        assert response.status_code == 422
+        assert "enum" in str(response.json()).lower()
 
     @pytest.mark.asyncio
-    async def test_filter_logs_by_task(self, client: AsyncClient, sample_task: Task):
-        """Тест фильтрации логов по задаче"""
-        log_data = {
-            "message": "Task log",
-            "level": "INFO",
-            "task_id": sample_task.id
-        }
-
-        await client.post("/logs/", json=log_data)
-
-        response = await client.get(f"/logs/?task_id={sample_task.id}")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) >= 1
-        assert data[0]["task_id"] == sample_task.id
-
-    @pytest.mark.asyncio
-    async def test_filter_logs_by_user(self, client: AsyncClient, sample_user: User):
-        """Тест фильтрации логов по пользователю"""
-        log_data = {
-            "message": "User log",
-            "level": "INFO",
-            "user_id": sample_user.id
-        }
-
-        await client.post("/logs/", json=log_data)
-
-        response = await client.get(f"/logs/?user_id={sample_user.id}")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) >= 1
-        assert data[0]["user_id"] == sample_user.id
-
-    @pytest.mark.asyncio
-    async def test_combined_filters(self, client: AsyncClient, sample_service: Service):
-        """Тест комбинированной фильтрации логов"""
-        log_data = {
-            "message": "Filtered log",
+    async def test_create_log_invalid_user(self, client: AsyncClient):
+        """Тест создания лога с несуществующим пользователем"""
+        invalid_log = {
+            "user_id": 999999,  # Несуществующий пользователь
+            "source": "invalid_user_logger",
+            "message": "Invalid user test",
             "level": "ERROR",
-            "service_id": sample_service.id
         }
 
-        await client.post("/logs/", json=log_data)
+        response = await client.post("/logs/", json=invalid_log)
 
-        # Фильтруем по уровню И сервису
-        response = await client.get(
-            f"/logs/?level=ERROR&service_id={sample_service.id}&hours=24"
-        )
+        assert response.status_code == 400
+        assert "does not exist" in response.json()["detail"].lower()
 
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) >= 1
-        assert all(
-            log["level"] == "ERROR" and log["service_id"] == sample_service.id
-            for log in data
-        )
+    @pytest.mark.asyncio
+    async def test_update_log_not_allowed(self, client: AsyncClient, sample_log: Log):
+        """Тест попытки обновления лога (должно быть запрещено)"""
+        update_data = {"message": "Updated message"}
+
+        response = await client.put(f"/logs/{sample_log.id}", json=update_data)
+
+        assert response.status_code == 405  # Method Not Allowed
+
+    @pytest.mark.asyncio
+    async def test_delete_log_not_allowed(self, client: AsyncClient, sample_log: Log):
+        """Тест попытки удаления лога (должно быть запрещено)"""
+        response = await client.delete(f"/logs/{sample_log.id}")
+
+        assert response.status_code == 405  # Method Not Allowed
+
+    @pytest.mark.asyncio
+    async def test_create_log_missing_required_fields(
+        self, client: AsyncClient, sample_user: User
+    ):
+        """Тест создания лога с отсутствующими обязательными полями"""
+        # Пропущено поле message
+        invalid_log = {
+            "user_id": sample_user.id,
+            "source": "missing_field_logger",
+            "level": "INFO",
+        }
+
+        response = await client.post("/logs/", json=invalid_log)
+
+        assert response.status_code == 422
+        assert "field required" in str(response.json()).lower()

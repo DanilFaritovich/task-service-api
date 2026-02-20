@@ -1,204 +1,266 @@
 """
-Конфигурация тестов — полностью асинхронный подход
+Фикстуры для тестов
 """
-import sys
+
 import os
-from pathlib import Path
-import asyncio
-import pytest
 from typing import AsyncGenerator
-from dotenv import load_dotenv
 
-# Добавляем корень проекта в PYTHONPATH
-PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete, select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
-# Загружаем переменные окружения
-load_dotenv(dotenv_path=PROJECT_ROOT / ".env.test")
+# 🔥 Устанавливаем флаг тестов ДО импорта app
+os.environ["TESTING_MODE"] = "true"
 
-from backend.database.models import Base, Service, User, Task
+
+from backend.api.deps import get_db, session_context
 from backend.api.main import app
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy import text
-import asyncpg
-import httpx
+from backend.database.base import Base, settings
 
-# Настройки БД
-DB_USER = os.getenv("DB_USER", "app_user")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "app_password")
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME", "app_db")
+# =============================================================================
+# EVENT LOOP (удалить кастомную фикстуру!)
+# =============================================================================
+# ❌ НЕ создавайте event_loop вручную — pytest-asyncio сделает это сам
 
-TEST_DB_NAME = f"test_{DB_NAME}"
-TEST_DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{TEST_DB_NAME}"
 
-print(f"🔧 Тестовая БД: {TEST_DB_NAME}")
-
-# Глобальный флаг для создания БД один раз
-_test_db_created = False
-
+# =============================================================================
+# БАЗА ДАННЫХ: ENGINE
+# =============================================================================
 @pytest.fixture(scope="session")
-def event_loop():
-    """Единый цикл событий для всей сессии тестов"""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+async def db_engine():
+    """Создает движок БД один раз на все тесты"""
+    db_url = str(settings.database_url)
 
-@pytest.fixture(scope="session", autouse=True)
-async def setup_test_database(event_loop):
+    test_engine = create_async_engine(
+        db_url,
+        echo=False,
+        poolclass=NullPool,  # ❗ Отключаем пул для избежания конфликта loop
+        future=True,
+        connect_args={
+            "server_settings": {"application_name": "test_app"},
+            "timeout": 10,
+        },
+    )
+
+    try:
+        async with test_engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+            print("✅ Подключение к БД успешно")
+    except Exception as e:
+        print(f"❌ Ошибка подключения к БД: {e}")
+        raise
+
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        print("✅ Таблицы созданы")
+
+    yield test_engine
+    await test_engine.dispose()
+
+
+# =============================================================================
+# БАЗА ДАННЫХ: СЕССИЯ (Исправленная версия)
+# =============================================================================
+@pytest.fixture
+async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
     """
-    Создаём тестовую БД один раз для всей сессии тестов
-    Используем синхронный подход через asyncio.run() для избежания проблем с циклами
+    Создает сессию БД для одного теста.
+
+    ИСПОЛЬЗУЕМ ПРОСТОЙ ПАТТЕРН:
+    1. Очищаем таблицы в НАЧАЛЕ теста (TRUNCATE)
+    2. Yield сессии
+    3. Rollback в конце для подстраховки
     """
-    global _test_db_created
-    if _test_db_created:
-        return
+    async_session = async_sessionmaker(
+        db_engine, expire_on_commit=False, class_=AsyncSession, autoflush=False
+    )
 
-    print(f"\n🚀 Создание тестовой БД: {TEST_DB_NAME}")
-
-    # Создаём БД через отдельный асинхронный вызов
-    async def _create_db():
-        conn = await asyncpg.connect(
-            user=DB_USER,
-            password=DB_PASSWORD,
-            host=DB_HOST,
-            port=DB_PORT,
-            database=DB_NAME
-        )
-
-        # Завершаем подключения к тестовой БД
+    async with async_session() as session:
         try:
-            await conn.execute(f"""
-                SELECT pg_terminate_backend(pid) 
-                FROM pg_stat_activity 
-                WHERE datname = $1
-            """, TEST_DB_NAME)
-        except:
-            pass
+            # 🔥 Очищаем таблицы перед тестом (в порядке: дочерние → родительские)
+            await session.execute(
+                text(
+                    "TRUNCATE TABLE task_files, logs, tasks, user_services, services, users "
+                    "RESTART IDENTITY CASCADE"
+                )
+            )
+            await session.commit()
 
-        # Удаляем и создаём БД
-        await conn.execute(f"DROP DATABASE IF EXISTS {TEST_DB_NAME}")
-        await conn.execute(f"CREATE DATABASE {TEST_DB_NAME}")
-        await conn.close()
-
-        # Создаём таблицы
-        engine = create_async_engine(TEST_DATABASE_URL, pool_pre_ping=True)
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        await engine.dispose()
-
-    await _create_db()
-    _test_db_created = True
-    yield
-
-    # Очистка после всех тестов
-    async def _drop_db():
-        conn = await asyncpg.connect(
-            user=DB_USER,
-            password=DB_PASSWORD,
-            host=DB_HOST,
-            port=DB_PORT,
-            database=DB_NAME
-        )
-        try:
-            await conn.execute(f"""
-                SELECT pg_terminate_backend(pid) 
-                FROM pg_stat_activity 
-                WHERE datname = $1
-            """, TEST_DB_NAME)
-        except:
-            pass
-        await conn.execute(f"DROP DATABASE IF EXISTS {TEST_DB_NAME}")
-        await conn.close()
-
-    await _drop_db()
-    print(f"\n✅ Тестовая БД удалена: {TEST_DB_NAME}")
-
-@pytest.fixture(scope="function")
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Асинхронная сессия с откатом транзакции после каждого теста
-    """
-    # Создаём новый движок для каждой сессии (избегаем проблем с циклами)
-    engine = create_async_engine(TEST_DATABASE_URL, pool_pre_ping=True)
-    async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-    async with engine.connect() as conn:
-        async with conn.begin() as transaction:
-            session = async_session(bind=conn)
+            # Устанавливаем сессию в ContextVar (как в оригинальном get_db)
+            token = session_context.set(session)
             yield session
-            await transaction.rollback()
+            session_context.reset(token)
+
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            # Гарантированная очистка
+            await session.rollback()
             await session.close()
 
-    # Закрываем движок после теста
-    await engine.dispose()
 
-@pytest.fixture(scope="function")
-async def client(db_session: AsyncSession) -> AsyncGenerator[httpx.AsyncClient, None]:
-    """Асинхронный тестовый клиент"""
-    # Переопределяем зависимость
+# =============================================================================
+# HTTP CLIENT
+# =============================================================================
+@pytest.fixture
+async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+    """Создает асинхронный клиент для тестирования API"""
+
+    original_overrides = app.dependency_overrides.copy()
+
     async def override_get_db():
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
 
-    # Используем ASGITransport для новых версий httpx
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://test"
-    ) as ac:
-        yield ac
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://testserver",
+            follow_redirects=True,
+        ) as ac:
+            yield ac
+    finally:
+        app.dependency_overrides = original_overrides
 
-    app.dependency_overrides.clear()
 
-# Импортируем зависимости ПОСЛЕ настройки путей
-from backend.database.connection import get_db
+# =============================================================================
+# ФИКСТУРЫ ДАННЫХ (упрощённые)
+# =============================================================================
+@pytest.fixture
+async def sample_service(db_session: AsyncSession):
+    from backend.database.models import Service
 
-@pytest.fixture(scope="function")
-async def sample_service(db_session: AsyncSession) -> Service:
-    """Тестовый сервис"""
     service = Service(
         name="test_service",
         display_name="Test Service",
-        description="Test description",
+        description="Test service description",
         is_active=True,
         is_blocked=False,
         max_concurrent_tasks=5,
-        timeout_seconds=300
+        timeout_seconds=300,
     )
     db_session.add(service)
-    await db_session.commit()
+    await db_session.flush()  # ✅ flush вместо commit()
     await db_session.refresh(service)
     return service
 
-@pytest.fixture(scope="function")
-async def sample_user(db_session: AsyncSession) -> User:
-    """Тестовый пользователь"""
-    user = User(
-        tg_id=123456789,
-        username="test_user",
-        is_active=True
-    )
+
+@pytest.fixture
+async def sample_user(db_session: AsyncSession):
+    from backend.database.models import User
+
+    user = User(tg_id=100001, username="test_user")
     db_session.add(user)
-    await db_session.commit()
+    await db_session.flush()
     await db_session.refresh(user)
     return user
 
-@pytest.fixture(scope="function")
-async def sample_task(
-    db_session: AsyncSession,
-    sample_user: User,
-    sample_service: Service
-) -> Task:
-    """Тестовая задача"""
+
+@pytest.fixture
+async def sample_task(db_session, sample_user, sample_service):
+    from backend.database.models import Task
+
     task = Task(
         user_id=sample_user.id,
         service_id=sample_service.id,
         task_name="Test Task",
-        status="pending"
+        status="pending",
     )
     db_session.add(task)
-    await db_session.commit()
+    await db_session.flush()
     await db_session.refresh(task)
     return task
+
+
+@pytest.fixture
+async def sample_log(db_session, sample_user):
+    from backend.database.models import Log
+
+    log = Log(
+        user_id=sample_user.id,
+        source="test_logger",
+        message="Test log message",
+        level="INFO",
+    )
+    db_session.add(log)
+    await db_session.flush()
+    await db_session.refresh(log)
+    return log
+
+
+@pytest.fixture
+async def sample_user_service(db_session, sample_user, sample_service):
+    """Создает и возвращает тестовый экземпляр UserService."""
+    from backend.database.models import UserService
+
+    # Проверяем, нет ли уже такой связи (из-за UniqueConstraint)
+    existing = await db_session.execute(
+        select(UserService).where(
+            UserService.user_id == sample_user.id,
+            UserService.service_id == sample_service.id,
+        )
+    )
+    if existing.scalars().first():
+        await db_session.execute(
+            delete(UserService).where(
+                UserService.user_id == sample_user.id,
+                UserService.service_id == sample_service.id,
+            )
+        )
+        await db_session.commit()
+
+    # Создаем новую связь
+    user_service = UserService(
+        user_id=sample_user.id,
+        service_id=sample_service.id,
+        config_data={
+            "api_key": "test_api_key",
+            "endpoint": "https://test.example.com/api",
+        },
+        is_enabled=True,
+    )
+    db_session.add(user_service)
+    await db_session.commit()
+    await db_session.refresh(user_service)
+
+    return user_service
+
+
+@pytest.fixture
+async def sample_task_file(db_session, sample_task):
+    """Создает и возвращает тестовый экземпляр TaskFile."""
+    from backend.database.models import TaskFile
+
+    # Опционально: проверяем наличие дубликатов, если есть уникальные ограничения
+    existing = await db_session.execute(
+        select(TaskFile).where(
+            TaskFile.task_id == sample_task.id,
+            TaskFile.file_path
+            == "/test/sample_file.txt",  # подставьте ваше условие уникальности
+        )
+    )
+    if existing.scalars().first():
+        await db_session.execute(
+            delete(TaskFile).where(
+                TaskFile.task_id == sample_task.id,
+                TaskFile.file_path == "/test/sample_file.txt",
+            )
+        )
+        await db_session.commit()
+
+    # Создаём тестовый файл
+    task_file = TaskFile(
+        task_id=sample_task.id,
+        file_path="/test/sample_file.txt",
+        file_size=1024,
+        file_hash="abc123def456",
+    )
+    db_session.add(task_file)
+    await db_session.commit()
+    await db_session.refresh(task_file)
+
+    return task_file

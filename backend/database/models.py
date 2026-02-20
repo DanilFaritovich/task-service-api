@@ -1,238 +1,222 @@
-"""
-Модели SQLAlchemy для асинхронной работы
-"""
-from sqlalchemy import Column, Integer, String, Boolean, Text, TIMESTAMP, ForeignKey, JSON, BIGINT, CheckConstraint
+from typing import Any, Dict, Optional
+
+from sqlalchemy import (
+    JSON,
+    TIMESTAMP,
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    desc,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
-from sqlalchemy.ext.asyncio import AsyncAttrs
-from .connection import Base
-from typing import List, Optional
+
+from backend.database.base import Base
 
 
-# ============================================================================
-# Модель: Сервисы
-# ============================================================================
-class Service(Base, AsyncAttrs):
+class Service(Base):
+    """Модель доступных сервисов"""
+
     __tablename__ = "services"
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), unique=True, nullable=False, index=True)
-    display_name = Column(String(255), nullable=False)
-    description = Column(Text)
-    is_active = Column(Boolean, default=True, nullable=False)
-    is_blocked = Column(Boolean, default=False, nullable=False)
-    max_concurrent_tasks = Column(Integer, default=1, nullable=False)
-    timeout_seconds = Column(Integer, default=300, nullable=False)
-    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
-    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=False)
-
-    # Relationships
-    config_fields = relationship(
-        "ServiceConfigField",
-        back_populates="service",
-        cascade="all, delete-orphan"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(
+        String(100), unique=True, nullable=False, index=True
     )
-    user_services = relationship(
-        "UserService",
-        back_populates="service",
-        cascade="all, delete-orphan"
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    user_default_config_data: Mapped[Dict[str, Any]] = mapped_column(
+        JSON, nullable=False, server_default="{}"
     )
-    tasks = relationship(
-        "Task",
-        back_populates="service",
-        cascade="all, delete-orphan"
+    system_default_config_data: Mapped[Dict[str, Any]] = mapped_column(
+        JSON, nullable=False, server_default="{}"
     )
-    logs = relationship(
-        "Log",
-        back_populates="service"
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    max_concurrent_tasks: Mapped[int] = mapped_column(Integer, default=1)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=300)
+    created_at: Mapped[Optional[Any]] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[Optional[Any]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
     )
 
-    def is_available(self) -> bool:
-        """Проверить, доступен ли сервис"""
-        return self.is_active and not self.is_blocked
-
-    def __repr__(self):
-        return f"<Service(id={self.id}, name='{self.name}')>"
-
-
-# ============================================================================
-# Модель: Поля конфигурации сервисов
-# ============================================================================
-class ServiceConfigField(Base, AsyncAttrs):
-    __tablename__ = "service_config_fields"
-
-    id = Column(Integer, primary_key=True, index=True)
-    service_id = Column(Integer, ForeignKey("services.id", ondelete="CASCADE"), nullable=False, index=True)
-    code = Column(String(100), nullable=False)
-    name_ru = Column(String(255), nullable=False)
-    name_en = Column(String(255), nullable=False)
-    value_type = Column(String(20), nullable=False)
-    default_value = Column(JSON)
-    is_required = Column(Boolean, default=False, nullable=False)
-    options = Column(JSON)
-    sort_order = Column(Integer, default=0, nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False, index=True)
-    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
-    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=False)
-
-    # Constraints
-    __table_args__ = (
-        CheckConstraint(
-            value_type.in_(['string', 'integer', 'boolean', 'float', 'array', 'json', 'enum']),
-            name='check_value_type'
-        ),
+    # Связи с явной типизацией
+    user_services: Mapped[list["UserService"]] = relationship(
+        "UserService", back_populates="service", cascade="all, delete-orphan"
+    )
+    tasks: Mapped[list["Task"]] = relationship(
+        "Task", back_populates="service", cascade="all, delete-orphan"
     )
 
-    # Relationships
-    service = relationship("Service", back_populates="config_fields")
-
-    def __repr__(self):
-        return f"<ServiceConfigField(id={self.id}, code='{self.code}')>"
+    __table_args__ = (Index("idx_services_active_blocked", "is_active", "is_blocked"),)
 
 
-# ============================================================================
-# Модель: Пользователи
-# ============================================================================
-class User(Base, AsyncAttrs):
+class User(Base):
+    """Модель пользователей"""
+
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
-    tg_id = Column(Integer, nullable=False, unique=True, index=True)
-    username = Column(String(255), nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
-    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=False)
-
-    # Relationships
-    user_services = relationship(
-        "UserService",
-        back_populates="user",
-        cascade="all, delete-orphan"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tg_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[Optional[Any]] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=func.current_timestamp()
     )
-    tasks = relationship(
-        "Task",
-        back_populates="user",
-        cascade="all, delete-orphan"
-    )
-    logs = relationship(
-        "Log",
-        back_populates="user"
+    updated_at: Mapped[Optional[Any]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
     )
 
-    def __repr__(self):
-        return f"<User(id={self.id}, tg_id={self.tg_id}, username='{self.username}')>"
+    # Связи
+    user_services: Mapped[list["UserService"]] = relationship(
+        "UserService", back_populates="user", cascade="all, delete-orphan"
+    )
+    tasks: Mapped[list["Task"]] = relationship(
+        "Task", back_populates="user", cascade="all, delete-orphan"
+    )
+    logs: Mapped[list["Log"]] = relationship(
+        "Log", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
-# ============================================================================
-# Модель: Конфигурации пользователей для сервисов
-# ============================================================================
-class UserService(Base, AsyncAttrs):
+class UserService(Base):
+    """Конфигурации пользователей для сервисов"""
+
     __tablename__ = "user_services"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    service_id = Column(Integer, ForeignKey("services.id", ondelete="CASCADE"), nullable=False, index=True)
-    config_data = Column(JSON)
-    is_enabled = Column(Boolean, default=True, nullable=False, index=True)
-    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
-    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    service_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("services.id", ondelete="CASCADE"), nullable=False
+    )
+    config_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[Optional[Any]] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[Optional[Any]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
+    )
 
-    # Relationships
-    user = relationship("User", back_populates="user_services")
-    service = relationship("Service", back_populates="user_services")
+    # Связи
+    user: Mapped["User"] = relationship("User", back_populates="user_services")
+    service: Mapped["Service"] = relationship("Service", back_populates="user_services")
 
-    def __repr__(self):
-        return f"<UserService(id={self.id}, user_id={self.user_id}, service_id={self.service_id})>"
+    __table_args__ = (
+        UniqueConstraint("user_id", "service_id", name="uq_user_service"),
+        Index("idx_user_services_user_id", "user_id"),
+        Index("idx_user_services_service_id", "service_id"),
+        Index("idx_user_services_enabled", "is_enabled"),
+    )
 
 
-# ============================================================================
-# Модель: Задачи
-# ============================================================================
-class Task(Base, AsyncAttrs):
+class Task(Base):
+    """Задачи пользователей"""
+
     __tablename__ = "tasks"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    service_id = Column(Integer, ForeignKey("services.id", ondelete="CASCADE"), nullable=False, index=True)
-    task_name = Column(String(255), nullable=False)
-    status = Column(String(50), nullable=False, index=True)
-    error_message = Column(Text)
-    result_data = Column(JSON)
-    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False, index=True)
-    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    service_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("services.id", ondelete="CASCADE"), nullable=False
+    )
+    task_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    result_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[Optional[Any]] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[Optional[Any]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
+    )
 
-    # Constraints
+    # Связи
+    user: Mapped["User"] = relationship("User", back_populates="tasks")
+    service: Mapped["Service"] = relationship("Service", back_populates="tasks")
+    task_files: Mapped[list["TaskFile"]] = relationship(
+        "TaskFile", back_populates="task", cascade="all, delete-orphan"
+    )
+
     __table_args__ = (
         CheckConstraint(
-            status.in_(['pending', 'running', 'completed', 'failed', 'cancelled']),
-            name='check_status'
+            "status IN ('pending', 'running', 'completed', 'failed', 'cancelled')",
+            name="check_task_status",
         ),
+        Index("idx_tasks_user_id", "user_id"),
+        Index("idx_tasks_service_id", "service_id"),
+        Index("idx_tasks_status", "status"),
+        Index("idx_tasks_created_at", "created_at"),
     )
 
-    # Relationships
-    user = relationship("User", back_populates="tasks")
-    service = relationship("Service", back_populates="tasks")
-    files = relationship(
-        "TaskFile",
-        back_populates="task",
-        cascade="all, delete-orphan"
-    )
-    logs = relationship(
-        "Log",
-        back_populates="task"
-    )
 
-    def __repr__(self):
-        return f"<Task(id={self.id}, status='{self.status}')>"
+class TaskFile(Base):
+    """Файлы задач"""
 
-
-# ============================================================================
-# Модель: Файлы задач
-# ============================================================================
-class TaskFile(Base, AsyncAttrs):
     __tablename__ = "task_files"
 
-    id = Column(Integer, primary_key=True, index=True)
-    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
-    file_path = Column(Text, nullable=False)
-    file_size = Column(BIGINT)
-    file_hash = Column(String(255))
-    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
-
-    # Relationships
-    task = relationship("Task", back_populates="files")
-
-    def __repr__(self):
-        return f"<TaskFile(id={self.id}, file_path='{self.file_path}')>"
-
-
-# ============================================================================
-# Модель: Логи
-# ============================================================================
-class Log(Base, AsyncAttrs):
-    __tablename__ = "logs"
-
-    id = Column(Integer, primary_key=True, index=True)
-    service_id = Column(Integer, ForeignKey("services.id", ondelete="SET NULL"), nullable=True, index=True)
-    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    timestamp = Column(TIMESTAMP, server_default=func.now(), nullable=False, index=True)
-    message = Column(Text, nullable=False)
-    level = Column(String(50), nullable=False, index=True)
-    context_data = Column(JSON)
-
-    # Constraints
-    __table_args__ = (
-        CheckConstraint(
-            level.in_(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']),
-            name='check_log_level'
-        ),
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    task_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    file_path: Mapped[str] = mapped_column(Text, nullable=False)
+    file_size: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    file_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[Optional[Any]] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=func.current_timestamp()
     )
 
-    # Relationships
-    service = relationship("Service", back_populates="logs")
-    task = relationship("Task", back_populates="logs")
-    user = relationship("User", back_populates="logs")
+    # Связи
+    task: Mapped["Task"] = relationship("Task", back_populates="task_files")
 
-    def __repr__(self):
-        return f"<Log(id={self.id}, level='{self.level}')>"
+    __table_args__ = (Index("idx_task_files_task_id", "task_id"),)
+
+
+class Log(Base):
+    """Логи"""
+
+    __tablename__ = "logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="NO ACTION"), nullable=False
+    )
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    timestamp: Mapped[Optional[Any]] = mapped_column(
+        TIMESTAMP, server_default=func.current_timestamp()
+    )
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    level: Mapped[str] = mapped_column(String(50), nullable=False)
+    context_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+    # Связи
+    user: Mapped["User"] = relationship("User", back_populates="logs")
+
+    __table_args__ = (
+        CheckConstraint(
+            "level IN ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')",
+            name="check_log_level",
+        ),
+        Index("idx_logs_user_id", "user_id"),
+        Index("idx_logs_source_timestamp", "source", desc("timestamp")),
+    )

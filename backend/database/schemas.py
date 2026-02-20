@@ -1,15 +1,11 @@
-"""
-Pydantic схемы для валидации данных
-"""
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-# ============================================================================
-# Enum для статусов и уровней
-# ============================================================================
+# ========== Enums ==========
 class TaskStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -26,53 +22,27 @@ class LogLevel(str, Enum):
     CRITICAL = "CRITICAL"
 
 
-class ConfigValueType(str, Enum):
-    STRING = "string"
-    INTEGER = "integer"
-    BOOLEAN = "boolean"
-    FLOAT = "float"
-    ARRAY = "array"
-    JSON = "json"
-    ENUM = "enum"
+# ========== Базовые схемы ==========
+class BaseSchema(BaseModel):
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+        validate_assignment=True,
+        extra="forbid",
+    )
 
 
-# ============================================================================
-# Схемы для пользователей
-# ============================================================================
-class UserBase(BaseModel):
-    tg_id: int = Field(..., description="Telegram ID пользователя")
-    username: str = Field(..., min_length=1, max_length=255)
-
-
-class UserCreate(UserBase):
-    pass
-
-
-class UserUpdate(BaseModel):
-    username: Optional[str] = Field(None, min_length=1, max_length=255)
-    is_active: Optional[bool] = None
-
-
-class User(UserBase):
-    id: int
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-# ============================================================================
-# Схемы для сервисов
-# ============================================================================
+# ========== Service ==========
 class ServiceBase(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100)
-    display_name: str = Field(..., min_length=1, max_length=255)
+    name: str = Field(..., max_length=100)
+    display_name: str = Field(..., max_length=255)
     description: Optional[str] = None
+    user_default_config_data: Dict[str, Any] = Field(default_factory=dict)
+    system_default_config_data: Dict[str, Any] = Field(default_factory=dict)
     is_active: bool = True
     is_blocked: bool = False
-    max_concurrent_tasks: int = Field(1, ge=1)
-    timeout_seconds: int = Field(300, ge=1)
+    max_concurrent_tasks: int = Field(1, ge=1, le=100)
+    timeout_seconds: int = Field(300, ge=1, le=86400)
 
 
 class ServiceCreate(ServiceBase):
@@ -80,188 +50,165 @@ class ServiceCreate(ServiceBase):
 
 
 class ServiceUpdate(BaseModel):
-    display_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = Field(None, max_length=100)
+    display_name: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = None
+    user_default_config_data: Optional[Dict[str, Any]] = None
+    system_default_config_data: Optional[Dict[str, Any]] = None
     is_active: Optional[bool] = None
     is_blocked: Optional[bool] = None
-    max_concurrent_tasks: Optional[int] = Field(None, ge=1)
-    timeout_seconds: Optional[int] = Field(None, ge=1)
+    max_concurrent_tasks: Optional[int] = Field(None, ge=1, le=100)
+    timeout_seconds: Optional[int] = Field(None, ge=1, le=86400)
 
 
-class Service(ServiceBase):
+class ServiceResponse(ServiceBase, BaseSchema):
     id: int
     created_at: datetime
-    updated_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
+    updated_at: Optional[datetime] = None
 
 
-# ============================================================================
-# Схемы для полей конфигурации
-# ============================================================================
-class ServiceConfigFieldBase(BaseModel):
-    code: str = Field(..., min_length=1, max_length=100)
-    name_ru: str = Field(..., min_length=1, max_length=255)
-    name_en: str = Field(..., min_length=1, max_length=255)
-    value_type: ConfigValueType
-    default_value: Optional[Any] = None
-    is_required: bool = False
-    options: Optional[Dict[str, Any]] = None
-    sort_order: int = 0
+# ========== User ==========
+class UserBase(BaseModel):
+    tg_id: int = Field(..., ge=1)
+    username: str = Field(..., max_length=255, min_length=1)
     is_active: bool = True
 
 
-class ServiceConfigFieldCreate(ServiceConfigFieldBase):
+class UserCreate(UserBase):
     pass
 
 
-class ServiceConfigFieldUpdate(BaseModel):
-    name_ru: Optional[str] = Field(None, min_length=1, max_length=255)
-    name_en: Optional[str] = Field(None, min_length=1, max_length=255)
-    default_value: Optional[Any] = None
-    is_required: Optional[bool] = None
-    options: Optional[Dict[str, Any]] = None
-    sort_order: Optional[int] = None
+class UserUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tg_id: Optional[int] = Field(None, ge=1)
+    username: Optional[str] = Field(None, max_length=255, min_length=1)
     is_active: Optional[bool] = None
 
 
-class ServiceConfigField(ServiceConfigFieldBase):
+class UserResponse(UserBase, BaseSchema):
     id: int
-    service_id: int
     created_at: datetime
-    updated_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
+    updated_at: Optional[datetime] = None
 
 
-# ============================================================================
-# Схемы для конфигураций пользователей
-# ============================================================================
+# ========== UserService ==========
 class UserServiceBase(BaseModel):
+    user_id: int
+    service_id: int
     config_data: Optional[Dict[str, Any]] = None
     is_enabled: bool = True
 
 
 class UserServiceCreate(UserServiceBase):
-    user_id: int
-    service_id: int
+    pass
 
 
 class UserServiceUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     config_data: Optional[Dict[str, Any]] = None
     is_enabled: Optional[bool] = None
 
 
-class UserService(UserServiceBase):
+class UserServiceResponse(UserServiceBase, BaseSchema):
     id: int
-    user_id: int
-    service_id: int
     created_at: datetime
-    updated_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
+    updated_at: Optional[datetime] = None
 
 
-# ============================================================================
-# Схемы для задач
-# ============================================================================
+# ========== Task ==========
 class TaskBase(BaseModel):
-    task_name: str = Field(..., min_length=1, max_length=255)
-    status: TaskStatus = TaskStatus.PENDING
-
-
-class TaskCreate(TaskBase):
     user_id: int
     service_id: int
+    task_name: str = Field(..., max_length=255, min_length=1)
+    status: TaskStatus
+    error_message: Optional[str] = None
+    result_data: Optional[Dict[str, Any]] = None
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def validate_status(cls, v):
+        if isinstance(v, TaskStatus):
+            return v
+        if isinstance(v, str):
+            return TaskStatus(v)
+        return v
+
+
+class TaskCreate(BaseModel):
+    user_id: int
+    service_id: int
+    task_name: str = Field(..., max_length=255, min_length=1)
+    status: TaskStatus = TaskStatus.PENDING
+    error_message: Optional[str] = None
+    result_data: Optional[Dict[str, Any]] = None
 
 
 class TaskUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_name: Optional[str] = Field(None, max_length=255, min_length=1)
     status: Optional[TaskStatus] = None
     error_message: Optional[str] = None
     result_data: Optional[Dict[str, Any]] = None
 
 
-class Task(TaskBase):
+class TaskResponse(TaskBase, BaseSchema):
     id: int
-    user_id: int
-    service_id: int
-    error_message: Optional[str] = None
-    result_data: Optional[Dict[str, Any]] = None
     created_at: datetime
-    updated_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
+    updated_at: Optional[datetime] = None
 
 
-# ============================================================================
-# Схемы для файлов задач
-# ============================================================================
+# ========== TaskFile ==========
 class TaskFileBase(BaseModel):
-    file_path: str
-    file_size: Optional[int] = None
-    file_hash: Optional[str] = None
+    task_id: int
+    file_path: str = Field(..., min_length=1, max_length=1024)
+    file_size: Optional[int] = Field(None, ge=0)
+    file_hash: Optional[str] = Field(None, max_length=255)
 
 
 class TaskFileCreate(TaskFileBase):
-    task_id: int
+    pass
 
 
-class TaskFile(TaskFileBase):
+class TaskFileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file_path: Optional[str] = Field(None, max_length=1024)
+    file_size: Optional[int] = Field(None, ge=0)
+    file_hash: Optional[str] = Field(None, max_length=255)
+
+
+class TaskFileResponse(TaskFileBase, BaseSchema):
     id: int
-    task_id: int
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
 
-
-# ============================================================================
-# Схемы для логов
-# ============================================================================
+# ========== Log ==========
 class LogBase(BaseModel):
+    user_id: int
+    source: str = Field(..., max_length=255)
     message: str
     level: LogLevel
     context_data: Optional[Dict[str, Any]] = None
 
 
 class LogCreate(LogBase):
-    service_id: Optional[int] = None
-    task_id: Optional[int] = None
-    user_id: Optional[int] = None
+    timestamp: Optional[datetime] = None
 
 
-class Log(LogBase):
+class LogUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source: Optional[str] = Field(None, max_length=255)
+    message: Optional[str] = None
+    level: Optional[LogLevel] = None
+    context_data: Optional[Dict[str, Any]] = None
+
+
+class LogResponse(LogBase, BaseSchema):
     id: int
-    service_id: Optional[int] = None
-    task_id: Optional[int] = None
-    user_id: Optional[int] = None
     timestamp: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-# ============================================================================
-# Схемы для ответов
-# ============================================================================
-class ServiceConfigSchema(BaseModel):
-    """Схема конфигурации сервиса для фронтенда"""
-    code: str
-    name_ru: str
-    name_en: str
-    value_type: ConfigValueType
-    default_value: Optional[Any] = None
-    is_required: bool
-    options: Optional[Dict[str, Any]] = None
-    sort_order: int
-
-
-class ServiceWithConfig(Service):
-    config_fields: List[ServiceConfigSchema]
-
-
-class UserWithServices(User):
-    active_services: List[Service] = []
-
-
-class TaskWithDetails(Task):
-    service: Optional[Service] = None
-    files: List[TaskFile] = []

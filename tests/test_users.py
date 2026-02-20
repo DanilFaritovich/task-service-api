@@ -1,9 +1,10 @@
 """
 Тесты для эндпоинтов пользователей
 """
+
 import pytest
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
+
 from backend.database.models import User
 
 
@@ -13,17 +14,15 @@ class TestUsers:
     @pytest.mark.asyncio
     async def test_create_user(self, client: AsyncClient):
         """Тест создания нового пользователя"""
-        user_data = {
-            "tg_id": 987654321,
-            "username": "new_user"
-        }
+        user_data = {"tg_id": 123456, "username": "test_user", "is_active": True}
 
         response = await client.post("/users/", json=user_data)
 
-        assert response.status_code == 201
+        assert response.status_code == 200
         data = response.json()
-        assert data["tg_id"] == 987654321
-        assert data["username"] == "new_user"
+        assert data["tg_id"] == 123456
+        assert data["username"] == "test_user"
+        assert data["is_active"] is True
         assert "id" in data
 
     @pytest.mark.asyncio
@@ -33,6 +32,7 @@ class TestUsers:
 
         assert response.status_code == 200
         data = response.json()
+        data = data["data"]
         assert isinstance(data, list)
         assert len(data) >= 1
 
@@ -45,15 +45,7 @@ class TestUsers:
         data = response.json()
         assert data["id"] == sample_user.id
         assert data["tg_id"] == sample_user.tg_id
-
-    @pytest.mark.asyncio
-    async def test_get_user_by_tg_id(self, client: AsyncClient, sample_user: User):
-        """Тест получения пользователя по Telegram ID"""
-        response = await client.get(f"/users/tg/{sample_user.tg_id}")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["tg_id"] == sample_user.tg_id
+        assert data["username"] == sample_user.username
 
     @pytest.mark.asyncio
     async def test_get_user_not_found(self, client: AsyncClient):
@@ -65,16 +57,18 @@ class TestUsers:
     @pytest.mark.asyncio
     async def test_update_user(self, client: AsyncClient, sample_user: User):
         """Тест обновления пользователя"""
-        update_data = {
-            "username": "updated_username",
-            "is_active": False
-        }
+        update_data = {"username": "updated_user", "is_active": False}
 
-        response = await client.put(f"/users/{sample_user.id}", json=update_data)
+        response = await client.patch(f"/users/{sample_user.id}", json=update_data)
 
         assert response.status_code == 200
-        data = response.json()
-        assert data["username"] == "updated_username"
+
+        get_response = await client.get(f"/users/{sample_user.id}")
+        assert get_response.status_code == 200
+
+        data = get_response.json()
+
+        assert data["username"] == "updated_user"
         assert data["is_active"] is False
 
     @pytest.mark.asyncio
@@ -82,36 +76,53 @@ class TestUsers:
         """Тест удаления пользователя"""
         response = await client.delete(f"/users/{sample_user.id}")
 
-        assert response.status_code == 204
+        assert response.status_code == 200
 
         # Проверяем, что пользователь удалён
         response = await client.get(f"/users/{sample_user.id}")
         assert response.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_create_user_duplicate(self, client: AsyncClient, sample_user: User):
+    async def test_create_user_duplicate_tg_id(
+        self, client: AsyncClient, sample_user: User
+    ):
         """Тест создания пользователя с дублирующим tg_id"""
         duplicate_user = {
             "tg_id": sample_user.tg_id,  # Дублирующий tg_id
-            "username": "duplicate"
+            "username": "duplicate_user",
+            "is_active": True,
         }
 
         response = await client.post("/users/", json=duplicate_user)
 
-        assert response.status_code == 400
-        assert "already exists" in response.json()["detail"].lower()
+        # Ожидаем ошибку 422, так как tg_id уникален
+        assert response.status_code == 422
+        assert "already registered" in str(response.json()).lower()
 
     @pytest.mark.asyncio
-    async def test_partial_update_user(self, client: AsyncClient, sample_user: User):
-        """Тест частичного обновления пользователя"""
-        # Обновляем только одно поле
-        response = await client.put(
-            f"/users/{sample_user.id}",
-            json={"username": "partial_update"}
-        )
+    async def test_create_user_invalid_tg_id(self, client: AsyncClient):
+        """Тест создания пользователя с невалидным tg_id"""
+        invalid_user = {
+            "tg_id": -1,  # Невалидный tg_id
+            "username": "invalid_user",
+            "is_active": True,
+        }
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["username"] == "partial_update"
-        # Проверяем, что другие поля не изменились
-        assert data["tg_id"] == sample_user.tg_id
+        response = await client.post("/users/", json=invalid_user)
+
+        assert response.status_code == 422
+        assert "greater than or equal to 1" in str(response.json()).lower()
+
+    @pytest.mark.asyncio
+    async def test_create_user_invalid_username(self, client: AsyncClient):
+        """Тест создания пользователя с коротким username"""
+        invalid_user = {
+            "tg_id": 789012,
+            "username": "",  # Пустой username
+            "is_active": True,
+        }
+
+        response = await client.post("/users/", json=invalid_user)
+
+        assert response.status_code == 422
+        assert "string_too_short" in str(response.json()).lower()

@@ -1,32 +1,36 @@
+#!/usr/bin/env python
 """
-Точка входа для запуска сервера
+Главный файл для запуска приложения
 """
-import os
+
+import logging
 import sys
 from pathlib import Path
 
-# Добавляем корень проекта в путь импорта
-sys.path.append(str(Path(__file__).parent))
+import uvicorn
 
-# Теперь можем импортировать из пакета backend
-from backend.api.main import app
+# Добавляем корневую директорию в путь для импорта
+sys.path.insert(0, str(Path(__file__).parent))
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+def main():
+    """Запуск FastAPI приложения"""
+    logger.info("Starting Task Service API...")
+
+    uvicorn.run(
+        "backend.api.main:app",  # Импорт из backend.api.main
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info",
+        access_log=True,
+        use_colors=True,
+        timeout_keep_alive=30,
+    )
+
 
 if __name__ == "__main__":
-    import uvicorn
-
-    # Настройки из .env
-    host = os.getenv("APP_HOST", "0.0.0.0")
-    port = int(os.getenv("APP_PORT", 8000))
-    debug = os.getenv("DEBUG", "True") == "True"
-
-    print(f"🚀 Запуск сервера на http://{host}:{port}")
-    print(f"📚 Документация: http://{host}:{port}/docs")
-
-    # Запуск сервера
-    uvicorn.run(
-        "backend.api.main:app",
-        host=host,
-        port=port,
-        reload=debug,
-        log_level="info"
-    )
+    main()
