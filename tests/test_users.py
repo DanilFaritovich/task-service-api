@@ -4,6 +4,7 @@
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database.models import User
 
@@ -40,6 +41,20 @@ class TestUsers:
     async def test_get_user_by_id(self, client: AsyncClient, sample_user: User):
         """Тест получения пользователя по ID"""
         response = await client.get(f"/users/{sample_user.id}")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == sample_user.id
+        assert data["tg_id"] == sample_user.tg_id
+        assert data["username"] == sample_user.username
+
+    @pytest.mark.asyncio
+    async def test_get_user_by_tg_id(
+        self, client: AsyncClient, sample_user: User, db_session: AsyncSession
+    ):
+        """Тест получения пользователя по ID"""
+
+        response = await client.get(f"/users/tg/{sample_user.tg_id}")
 
         assert response.status_code == 200
         data = response.json()
