@@ -37,10 +37,10 @@ class Service(Base):
     system_default_config_data: Mapped[Dict[str, Any]] = mapped_column(
         JSON, nullable=False, server_default="{}"
     )
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
-    max_concurrent_tasks: Mapped[int] = mapped_column(Integer, default=1)
-    timeout_seconds: Mapped[int] = mapped_column(Integer, default=300)
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    is_blocked: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    max_concurrent_tasks: Mapped[int] = mapped_column(Integer, server_default="1")
+    timeout_seconds: Mapped[int] = mapped_column(Integer, server_default="300")
     created_at: Mapped[Optional[Any]] = mapped_column(
         TIMESTAMP(timezone=True), server_default=func.current_timestamp()
     )
@@ -69,7 +69,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     tg_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
     username: Mapped[str] = mapped_column(String(255), nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default="true")
     created_at: Mapped[Optional[Any]] = mapped_column(
         TIMESTAMP(timezone=True), server_default=func.current_timestamp()
     )
@@ -104,7 +104,7 @@ class UserService(Base):
         Integer, ForeignKey("services.id", ondelete="CASCADE"), nullable=False
     )
     config_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, server_default="true")
     created_at: Mapped[Optional[Any]] = mapped_column(
         TIMESTAMP(timezone=True), server_default=func.current_timestamp()
     )
