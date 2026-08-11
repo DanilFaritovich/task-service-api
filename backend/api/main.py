@@ -32,6 +32,15 @@ from backend.database.schemas import (
     UserServiceResponse,
     UserServiceUpdate,
 )
+from backend.exceptions import (
+    AccessDeniedError,
+    BusinessException,
+    BusinessValidationError,
+    ConflictError,
+    NotFoundError,
+    ServiceUnavailableError,
+    TooManyRequestsError,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,6 +48,15 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+BUSINESS_EXCEPTION_STATUS_CODES = {
+    NotFoundError: status.HTTP_404_NOT_FOUND,
+    ServiceUnavailableError: status.HTTP_400_BAD_REQUEST,
+    AccessDeniedError: status.HTTP_403_FORBIDDEN,
+    TooManyRequestsError: status.HTTP_429_TOO_MANY_REQUESTS,
+    BusinessValidationError: status.HTTP_400_BAD_REQUEST,
+    ConflictError: status.HTTP_409_CONFLICT,
+}
 
 
 @asynccontextmanager
@@ -97,35 +115,84 @@ app.add_middleware(
 if os.getenv("TESTING_MODE") != "true":
     app.middleware("http")(db_session_middleware)
 
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    logger.error(f"Global exception: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error", "type": exc.__class__.__name__},
+@app.exception_handler(BusinessException)
+async def business_exception_handler(
+    request: Request,
+    exc: BusinessException,
+) -> JSONResponse:
+    status_code = BUSINESS_EXCEPTION_STATUS_CODES.get(
+        type(exc),
+        status.HTTP_400_BAD_REQUEST,
     )
 
+    logger.warning(
+        "Business exception: %s (status=%s, path=%s)",
+        exc.__class__.__name__,
+        status_code,
+        request.url.path,
+    )
+
+    return JSONResponse(
+        status_code=status_code,
+        content={"detail": exc.message},
+    )
 
 @app.exception_handler(IntegrityError)
-async def integrity_error_handler(request: Request, exc: IntegrityError):
-    """Обрабатывает ошибки целостности БД (FK, unique) как 400 Bad Request"""
-    error_msg = str(exc.orig).lower()
+async def integrity_error_handler(
+    request: Request,
+    exc: IntegrityError,
+) -> JSONResponse:
+    error_code = getattr(exc.orig, "sqlstate", None)
 
-    if "foreign key" in error_msg:
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"detail": "Referenced resource does not exist"},
-        )
-    elif "unique" in error_msg or "duplicate" in error_msg:
+    if error_code == "23505":
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content={"detail": "Resource already exists"},
         )
 
+    if error_code == "23503":
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": "Referenced resource does not exist"},
+        )
+
+    if error_code == "23502":
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": "Required field is missing"},
+        )
+
+    if error_code == "23514":
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": "Database constraint violated"},
+        )
+
+    logger.error(
+        "Unhandled database integrity error",
+        exc_info=True,
+    )
+
     return JSONResponse(
         status_code=status.HTTP_400_BAD_REQUEST,
         content={"detail": "Database integrity error"},
+    )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(
+    request: Request,
+    exc: Exception,
+) -> JSONResponse:
+    logger.error(
+        "Unhandled exception",
+        exc_info=True,
+    )
+
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": "Internal server error",
+        },
     )
 
 
