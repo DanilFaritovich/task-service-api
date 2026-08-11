@@ -1,7 +1,9 @@
-from fastapi import HTTPException
+from typing import cast
+
 from fastcrud import FastCRUD
 
 from backend.database.models import User
+from backend.exceptions import NotFoundError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 class UsersService:
@@ -14,12 +16,19 @@ class UsersService:
     async def get_user_by_tg_id(
         self,
         tg_id: int
-    ) -> dict:
+    ) -> User:
         """Получение пользователя по tg id"""
         
-        user = await self.user_crud.get(db=self.db, tg_id=tg_id)
+        user = cast( 
+            User | None,
+            await self.user_crud.get(
+                db=self.db, 
+                tg_id=tg_id,
+                return_as_model=True
+            )
+        )
     
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+        if user is None:
+            raise NotFoundError("User", tg_id, "Telegram ID")
     
         return user
