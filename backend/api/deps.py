@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database.base import AsyncSessionLocal
 
-# ContextVar для хранения сессии в рамках запроса (новое в FastAPI + asyncio)
 session_context: ContextVar[AsyncSession | None] = ContextVar(
     "session_context", default=None
 )
@@ -18,7 +17,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     Сессия автоматически закрывается после завершения запроса.
     """
     async with AsyncSessionLocal() as session:
-        # Сохраняем сессию в контексте для возможного использования в других местах
         token = session_context.set(session)
         try:
             yield session
@@ -27,16 +25,13 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-# Функция для получения текущей сессии из контекста (полезно для middleware)
 async def get_current_session() -> AsyncSession | None:
     return session_context.get()
 
 
-# Тип для аннотации зависимостей
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 
 
-# Middleware для добавления сессии в request.state
 async def db_session_middleware(request: Request, call_next):
     """Middleware для автоматического управления сессией"""
     async with AsyncSessionLocal() as session:

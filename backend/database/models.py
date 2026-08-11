@@ -50,7 +50,6 @@ class Service(Base):
         onupdate=func.current_timestamp(),
     )
 
-    # Связи с явной типизацией
     user_services: Mapped[list["UserService"]] = relationship(
         "UserService", back_populates="service", cascade="all, delete-orphan"
     )
@@ -79,7 +78,6 @@ class User(Base):
         onupdate=func.current_timestamp(),
     )
 
-    # Связи
     user_services: Mapped[list["UserService"]] = relationship(
         "UserService", back_populates="user", cascade="all, delete-orphan"
     )
@@ -114,7 +112,6 @@ class UserService(Base):
         onupdate=func.current_timestamp(),
     )
 
-    # Связи
     user: Mapped["User"] = relationship("User", back_populates="user_services")
     service: Mapped["Service"] = relationship("Service", back_populates="user_services")
 
@@ -151,7 +148,6 @@ class Task(Base):
         onupdate=func.current_timestamp(),
     )
 
-    # Связи
     user: Mapped["User"] = relationship("User", back_populates="tasks")
     service: Mapped["Service"] = relationship("Service", back_populates="tasks")
     task_files: Mapped[list["TaskFile"]] = relationship(
@@ -186,7 +182,6 @@ class TaskFile(Base):
         TIMESTAMP(timezone=True), server_default=func.current_timestamp()
     )
 
-    # Связи
     task: Mapped["Task"] = relationship("Task", back_populates="task_files")
 
     __table_args__ = (Index("idx_task_files_task_id", "task_id"),)
@@ -209,7 +204,6 @@ class Log(Base):
     level: Mapped[str] = mapped_column(String(50), nullable=False)
     context_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
 
-    # Связи
     user: Mapped["User"] = relationship("User", back_populates="logs")
 
     __table_args__ = (

@@ -33,7 +33,6 @@ from backend.database.schemas import (
     UserServiceUpdate,
 )
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -47,16 +46,13 @@ async def lifespan(app: FastAPI):
     """
     События жизненного цикла приложения
     """
-    # Startup
     logger.info("🚀 Starting up Application...")
 
-    # Безопасно маскируем пароль в URL
     db_url = str(settings.database_url)
     if hasattr(settings, "db_password") and settings.db_password:
         db_url = db_url.replace(settings.db_password, "******")
     logger.info(f"Database URL: {db_url}")
 
-    # Проверяем подключение к БД
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
@@ -64,7 +60,6 @@ async def lifespan(app: FastAPI):
             version = result.scalar()
             logger.info(f"✅ Database connection successful: {version}")
 
-            # Автоматическое создание таблиц (только для разработки)
             if settings.db_echo:
                 logger.info("Creating database tables...")
                 async with engine.begin() as conn:
@@ -76,13 +71,11 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
     logger.info("🛑 Shutting down Application...")
     await engine.dispose()
     logger.info("✅ Database connections closed")
 
 
-# Создаем приложение
 app = FastAPI(
     title="Task Service API",
     description="API для управления сервисами, задачами и пользователями",
@@ -93,7 +86,6 @@ app = FastAPI(
     openapi_url="/openapi.json",
 )
 
-# Добавляем CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -102,12 +94,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Добавляем middleware для БД
 if os.getenv("TESTING_MODE") != "true":
     app.middleware("http")(db_session_middleware)
 
 
-# Обработчик глобальных исключений
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     logger.error(f"Global exception: {exc}", exc_info=True)
@@ -133,7 +123,6 @@ async def integrity_error_handler(request: Request, exc: IntegrityError):
             content={"detail": "Resource already exists"},
         )
 
-    # Для остальных IntegrityError
     return JSONResponse(
         status_code=status.HTTP_400_BAD_REQUEST,
         content={"detail": "Database integrity error"},
@@ -154,7 +143,7 @@ app.include_router(
         select_schema=ServiceResponse,
         path="/services",
         tags=["Services"],
-        include_relationships=False,  # СВЯЗИ ОТКЛЮЧЕНЫ
+        include_relationships=False,
         included_methods=[
             "create",
             "read",
@@ -179,7 +168,7 @@ app.include_router(
         select_schema=UserServiceResponse,
         path="/user-services",
         tags=["User Services"],
-        include_relationships=False,  # СВЯЗИ ОТКЛЮЧЕНЫ
+        include_relationships=False,
     )
 )
 
@@ -197,7 +186,7 @@ app.include_router(
         select_schema=TaskFileResponse,
         path="/task-files",
         tags=["Task Files"],
-        include_relationships=False,  # СВЯЗИ ОТКЛЮЧЕНЫ
+        include_relationships=False,
     )
 )
 
@@ -212,7 +201,7 @@ app.include_router(
         path="/logs",
         tags=["Logs"],
         deleted_methods=["update", "delete"],
-        include_relationships=False,  # СВЯЗИ ОТКЛЮЧЕНЫ
+        include_relationships=False,
     )
 )
 
@@ -241,7 +230,6 @@ async def health_check(db: DbDep):
         "database": {},
     }
 
-    # Проверка БД
     try:
         start_time = datetime.now(timezone.utc)
         result = await db.execute(text("SELECT 1"))

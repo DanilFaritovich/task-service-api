@@ -9,7 +9,7 @@ from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 from backend.database.models import Base
-from backend.database.triggers.users_trigers import (
+from backend.database.triggers.users_triggers import (
     assign_default_services_function,
     trg_after_insert_users_assign_services,
 )

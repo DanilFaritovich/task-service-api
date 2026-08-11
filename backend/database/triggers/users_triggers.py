@@ -31,6 +31,6 @@ assign_default_services_function = PGFunction(
 trg_after_insert_users_assign_services = PGTrigger(
     schema="public",
     signature="trg_after_insert_users_assign_services",
-    on_entity="public.users",  # Рекомендуется заменить my_table на users
+    on_entity="public.users",
     definition="AFTER INSERT ON public.users FOR EACH ROW EXECUTE FUNCTION public.assign_default_services_function()",
 )

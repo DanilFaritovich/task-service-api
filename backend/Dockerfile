@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 # Установка зависимостей системы
 RUN apt-get update && apt-get install -y \
@@ -13,7 +13,7 @@ COPY requirements.txt .
 RUN pip install --user --no-cache-dir -r requirements.txt
 
 # Stage 2: Runtime
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # Установка только необходимых системных зависимостей
 RUN apt-get update && apt-get install -y \

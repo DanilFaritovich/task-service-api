@@ -1,8 +1,8 @@
-"""add users trigger
+"""add users triggers
 
-Revision ID: 391baea3208f
-Revises: 29d1827fab7a
-Create Date: 2026-04-01 10:39:00.840222
+Revision ID: 3398e5014752
+Revises: 16ac6f8233f1
+Create Date: 2026-08-10 18:10:47.900812
 
 """
 from typing import Sequence, Union
@@ -15,8 +15,8 @@ from alembic_utils.pg_trigger import PGTrigger
 from sqlalchemy import text as sql_text
 
 # revision identifiers, used by Alembic.
-revision: str = '391baea3208f'
-down_revision: Union[str, Sequence[str], None] = '29d1827fab7a'
+revision: str = '3398e5014752'
+down_revision: Union[str, Sequence[str], None] = '16ac6f8233f1'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

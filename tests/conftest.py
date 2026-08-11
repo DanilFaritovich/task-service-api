@@ -11,19 +11,12 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-# 🔥 Устанавливаем флаг тестов ДО импорта app
 os.environ["TESTING_MODE"] = "true"
 
 
 from backend.api.deps import get_db, session_context
 from backend.api.main import app
 from backend.database.base import Base, settings
-
-# =============================================================================
-# EVENT LOOP (удалить кастомную фикстуру!)
-# =============================================================================
-# ❌ НЕ создавайте event_loop вручную — pytest-asyncio сделает это сам
-
 
 # =============================================================================
 # БАЗА ДАННЫХ: ENGINE
@@ -36,7 +29,7 @@ async def db_engine():
     test_engine = create_async_engine(
         db_url,
         echo=False,
-        poolclass=NullPool,  # ❗ Отключаем пул для избежания конфликта loop
+        poolclass=NullPool,
         future=True,
         connect_args={
             "server_settings": {"application_name": "test_app"},
@@ -79,7 +72,7 @@ async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
 
     async with async_session() as session:
         try:
-            # 🔥 Очищаем таблицы перед тестом (в порядке: дочерние → родительские)
+            # Очищаем таблицы перед тестом (в порядке: дочерние → родительские)
             await session.execute(
                 text(
                     "TRUNCATE TABLE task_files, logs, tasks, user_services, services, users "
@@ -97,7 +90,6 @@ async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             raise
         finally:
-            # Гарантированная очистка
             await session.rollback()
             await session.close()
 
@@ -144,7 +136,7 @@ async def sample_service(db_session: AsyncSession):
         timeout_seconds=300,
     )
     db_session.add(service)
-    await db_session.flush()  # ✅ flush вместо commit()
+    await db_session.flush()
     await db_session.refresh(service)
     return service
 
@@ -197,7 +189,6 @@ async def sample_user_service(db_session, sample_user, sample_service):
     """Создает и возвращает тестовый экземпляр UserService."""
     from backend.database.models import UserService
 
-    # Проверяем, нет ли уже такой связи (из-за UniqueConstraint)
     existing = await db_session.execute(
         select(UserService).where(
             UserService.user_id == sample_user.id,
@@ -213,7 +204,6 @@ async def sample_user_service(db_session, sample_user, sample_service):
         )
         await db_session.commit()
 
-    # Создаем новую связь
     user_service = UserService(
         user_id=sample_user.id,
         service_id=sample_service.id,
@@ -235,12 +225,11 @@ async def sample_task_file(db_session, sample_task):
     """Создает и возвращает тестовый экземпляр TaskFile."""
     from backend.database.models import TaskFile
 
-    # Опционально: проверяем наличие дубликатов, если есть уникальные ограничения
     existing = await db_session.execute(
         select(TaskFile).where(
             TaskFile.task_id == sample_task.id,
             TaskFile.file_path
-            == "/test/sample_file.txt",  # подставьте ваше условие уникальности
+            == "/test/sample_file.txt",
         )
     )
     if existing.scalars().first():
@@ -252,7 +241,6 @@ async def sample_task_file(db_session, sample_task):
         )
         await db_session.commit()
 
-    # Создаём тестовый файл
     task_file = TaskFile(
         task_id=sample_task.id,
         file_path="/test/sample_file.txt",
