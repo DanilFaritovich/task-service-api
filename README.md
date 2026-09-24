@@ -1,5 +1,7 @@
 # Task Service API
 
+**English** | [Русский](README.ru.md)
+
 Async REST API microservice for managing **tasks, services, and users**.
 
 Built with FastAPI, SQLAlchemy 2.x, PostgreSQL, Alembic, and Pydantic v2.
